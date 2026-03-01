@@ -8,9 +8,16 @@ if [[ "$BUILD_TYPE" != "debug" && "$BUILD_TYPE" != "release" ]]; then
   exit 1
 fi
 
-if [[ ! -d android ]]; then
-  echo "android directory missing. Running prebuild first..."
-  CI=1 npx expo prebuild --platform android
+has_android_gradle_project() {
+  [[ -f android/settings.gradle || -f android/settings.gradle.kts || -f android/settings.gradle.dcl ]] || return 1
+  [[ -f android/build.gradle || -f android/build.gradle.kts || -f android/build.gradle.dcl ]] || return 1
+  return 0
+}
+
+if ! has_android_gradle_project; then
+  echo "android Gradle project missing or incomplete. Running prebuild first..."
+  rm -rf android
+  CI=1 npx expo prebuild --platform android --non-interactive
 fi
 
 GRADLE_TASK="assembleDebug"
@@ -29,7 +36,11 @@ if [[ -n "${JAVA_HOME:-}" ]]; then
   export PATH="$JAVA_HOME/bin:$PATH"
 fi
 
-(cd android && gradle "$GRADLE_TASK" --no-daemon)
+if [[ -x android/gradlew ]]; then
+  (cd android && ./gradlew "$GRADLE_TASK" --no-daemon)
+else
+  (cd android && gradle "$GRADLE_TASK" --no-daemon)
+fi
 
 APK_PATH="android/app/build/outputs/apk/${BUILD_TYPE}/app-${BUILD_TYPE}.apk"
 if [[ -f "$APK_PATH" ]]; then
