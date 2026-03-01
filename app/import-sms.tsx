@@ -81,7 +81,7 @@ export default function ImportSmsScreen() {
         <View style={[styles.card, { backgroundColor: theme.card }]}>
           <Text style={[styles.title, { color: theme.text }]}>Paste SMS Text</Text>
           <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
-            Inbox permissions are enabled for SMS-based workflows. You can paste bank SMS lines here to auto-detect expenses/income.
+            Paste bank SMS lines here to auto-detect expenses/income. No inbox permission is required.
           </Text>
           <TextInput
             style={[styles.input, { backgroundColor: theme.cardElevated, color: theme.text }]}
