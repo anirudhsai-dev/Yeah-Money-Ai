@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   StyleSheet, Text, View, Pressable, Platform,
-  Alert, TextInput,
+  Alert, TextInput, ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -25,6 +25,7 @@ export default function GoalsScreen() {
   // Calculator State
   const [selectedTxnIds, setSelectedTxnIds] = useState<string[]>([]);
   const [monthsToSave, setMonthsToSave] = useState('6');
+  const [calculatorMonth, setCalculatorMonth] = useState(() => new Date());
 
   const topInset = Platform.OS === 'web' ? 67 : insets.top;
   const totalSavings = useMemo(() => getTotalBalance(), [getTotalBalance]);
@@ -35,12 +36,28 @@ export default function GoalsScreen() {
   const completedGoals = useMemo(() => goals.filter(g => g.isCompleted), [goals]);
   const hasEmergencyFundGoal = useMemo(() => goals.some(g => g.name === 'Emergency Fund'), [goals]);
 
-  const recentExpenses = useMemo(() => {
+  const monthlyExpenses = useMemo(() => {
+    const targetMonth = calculatorMonth.getMonth();
+    const targetYear = calculatorMonth.getFullYear();
+
     return transactions
-      .filter(t => t.type === 'expense')
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-      .slice(0, 20);
-  }, [transactions]);
+      .filter(t => {
+        if (t.type !== 'expense') return false;
+        const txnDate = new Date(t.date);
+        return txnDate.getMonth() === targetMonth && txnDate.getFullYear() === targetYear;
+      })
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [calculatorMonth, transactions]);
+
+  const calculatorMonthLabel = useMemo(() => (
+    calculatorMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+  ), [calculatorMonth]);
+
+  const shiftCalculatorMonth = (offset: number) => {
+    setCalculatorMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + offset, 1));
+    setSelectedTxnIds([]);
+    Haptics.selectionAsync();
+  };
 
   const toggleTxnSelection = (id: string) => {
     setSelectedTxnIds(prev =>
@@ -211,36 +228,58 @@ export default function GoalsScreen() {
                 <Ionicons name="close" size={20} color={theme.textTertiary} />
               </Pressable>
             </View>
-            <Text style={[styles.calcSub, { color: theme.textSecondary }]}>
+            <Text style={[styles.calcSub, { color: theme.textSecondary }]}> 
               Select mandatory monthly expenses to calculate your safety net.
             </Text>
 
+            <View style={styles.monthSelectorRow}>
+              <Pressable
+                style={[styles.monthNavBtn, { backgroundColor: theme.cardElevated }]}
+                onPress={() => shiftCalculatorMonth(-1)}
+              >
+                <Ionicons name="chevron-back" size={18} color={theme.text} />
+              </Pressable>
+              <Text style={[styles.monthLabel, { color: theme.text }]}>{calculatorMonthLabel}</Text>
+              <Pressable
+                style={[styles.monthNavBtn, { backgroundColor: theme.cardElevated }]}
+                onPress={() => shiftCalculatorMonth(1)}
+              >
+                <Ionicons name="chevron-forward" size={18} color={theme.text} />
+              </Pressable>
+            </View>
+
             <View style={styles.txnSelectorList}>
-              {recentExpenses.length === 0 ? (
-                <Text style={[styles.noTxns, { color: theme.textTertiary }]}>No recent expenses found to select.</Text>
+              {monthlyExpenses.length === 0 ? (
+                <Text style={[styles.noTxns, { color: theme.textTertiary }]}>No expense transactions found for this month.</Text>
               ) : (
-                recentExpenses.map(txn => (
-                  <Pressable
-                    key={txn.id}
-                    style={[
-                      styles.txnSelectRow,
-                      { borderBottomColor: theme.border },
-                      selectedTxnIds.includes(txn.id) && { backgroundColor: theme.primaryMuted }
-                    ]}
-                    onPress={() => toggleTxnSelection(txn.id)}
-                  >
-                    <Ionicons
-                      name={selectedTxnIds.includes(txn.id) ? "checkbox" : "square-outline"}
-                      size={18}
-                      color={selectedTxnIds.includes(txn.id) ? theme.primary : theme.textTertiary}
-                    />
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.txnName, { color: theme.text }]} numberOfLines={1}>{txn.notes || 'Expense'}</Text>
-                      <Text style={[styles.txnDate, { color: theme.textTertiary }]}>{formatDate(txn.date)}</Text>
-                    </View>
-                    <Text style={[styles.txnAmount, { color: theme.text }]}>{formatCurrency(txn.amount)}</Text>
-                  </Pressable>
-                ))
+                <ScrollView
+                  style={styles.txnScrollArea}
+                  nestedScrollEnabled
+                  showsVerticalScrollIndicator
+                >
+                  {monthlyExpenses.map(txn => (
+                    <Pressable
+                      key={txn.id}
+                      style={[
+                        styles.txnSelectRow,
+                        { borderBottomColor: theme.border },
+                        selectedTxnIds.includes(txn.id) && { backgroundColor: theme.primaryMuted }
+                      ]}
+                      onPress={() => toggleTxnSelection(txn.id)}
+                    >
+                      <Ionicons
+                        name={selectedTxnIds.includes(txn.id) ? "checkbox" : "square-outline"}
+                        size={18}
+                        color={selectedTxnIds.includes(txn.id) ? theme.primary : theme.textTertiary}
+                      />
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.txnName, { color: theme.text }]} numberOfLines={1}>{txn.notes || 'Expense'}</Text>
+                        <Text style={[styles.txnDate, { color: theme.textTertiary }]}>{formatDate(txn.date)}</Text>
+                      </View>
+                      <Text style={[styles.txnAmount, { color: theme.text }]}>{formatCurrency(txn.amount)}</Text>
+                    </Pressable>
+                  ))}
+                </ScrollView>
               )}
             </View>
 
@@ -441,7 +480,11 @@ const styles = StyleSheet.create({
   calcHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   calcTitle: { flex: 1, fontSize: 16, fontFamily: 'DMSans_600SemiBold' },
   calcSub: { fontSize: 12, fontFamily: 'DMSans_400Regular', marginBottom: 12 },
-  txnSelectorList: { maxHeight: 200, marginBottom: 16, borderRadius: 8, overflow: 'hidden' },
+  monthSelectorRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  monthNavBtn: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  monthLabel: { fontSize: 13, fontFamily: 'DMSans_600SemiBold' },
+  txnSelectorList: { maxHeight: 240, marginBottom: 16, borderRadius: 8, overflow: 'hidden' },
+  txnScrollArea: { flexGrow: 0 },
   txnSelectRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 8, gap: 10, borderBottomWidth: 1 },
   txnName: { fontSize: 13, fontFamily: 'DMSans_500Medium' },
   txnDate: { fontSize: 11, fontFamily: 'DMSans_400Regular' },
