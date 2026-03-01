@@ -1,16 +1,12 @@
 name: Build APK
 
 on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
   workflow_dispatch:
     inputs:
       build_type:
-        description: 'Build Type'
+        description: "Build Type"
         required: true
-        default: 'debug'
+        default: "debug"
         type: choice
         options:
           - debug
@@ -22,33 +18,54 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      # Checkout repo
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
+      # Node setup with cache
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
 
+      # Install dependencies (faster than npm install)
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
+      # Java setup with Gradle cache
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
-          java-version: '17'
+          distribution: "zulu"
+          java-version: "17"
+          cache: gradle
 
+      # Android SDK
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      # Extra Gradle Cache (important)
+      - name: Cache Gradle Files
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            android/.gradle
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}
+
+      # Build Debug APK
       - name: Build Debug APK
-        if: ${{ github.event.inputs.build_type == 'debug' || github.event.inputs.build_type == 'both' || github.event_name == 'push' || github.event_name == 'pull_request' }}
+        if: ${{ github.event.inputs.build_type == 'debug' || github.event.inputs.build_type == 'both' }}
         run: |
           chmod +x ./scripts/build-apk.sh
           export YM_JAVA_HOME=$JAVA_HOME
           npm run apk:debug
 
+      # Build Release APK
       - name: Build Release APK
         if: ${{ github.event.inputs.build_type == 'release' || github.event.inputs.build_type == 'both' }}
         run: |
@@ -56,13 +73,15 @@ jobs:
           export YM_JAVA_HOME=$JAVA_HOME
           npm run apk:release
 
+      # Upload Debug APK
       - name: Upload Debug APK
-        if: ${{ github.event.inputs.build_type == 'debug' || github.event.inputs.build_type == 'both' || github.event_name == 'push' || github.event_name == 'pull_request' }}
+        if: ${{ github.event.inputs.build_type == 'debug' || github.event.inputs.build_type == 'both' }}
         uses: actions/upload-artifact@v4
         with:
           name: YeahMoney-Debug-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
 
+      # Upload Release APK
       - name: Upload Release APK
         if: ${{ github.event.inputs.build_type == 'release' || github.event.inputs.build_type == 'both' }}
         uses: actions/upload-artifact@v4
