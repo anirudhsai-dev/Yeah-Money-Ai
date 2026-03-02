@@ -1,5 +1,3 @@
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
-
 # dependencies
 node_modules/
 
@@ -32,13 +30,13 @@ yarn-error.*
 *.pem
 
 # local env files
-.env*.local
+.env
+.env.local
+.env.*.local
 
 # typescript
 *.tsbuildinfo
 .vercel
-
-.env
 
 # IDEs
 .idea/
@@ -48,3 +46,4 @@ yarn-error.*
 attached_assets/
 replit.md
 .replit
+backend/.env
