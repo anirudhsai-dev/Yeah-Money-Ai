@@ -8,13 +8,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { useTheme } from '@/hooks/useTheme';
+import { useTheme, useThemeConfig } from '@/hooks/useTheme';
 import { useFinance } from '@/lib/finance-context';
 import { formatCurrency, formatDate, getMonthName } from '@/lib/utils';
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const theme = useTheme();
+  const { isDark } = useThemeConfig();
   const {
     accounts, categories, transactions, getAccountBalance,
     getTotalBalance, getMonthlyIncome, getMonthlyExpense, refreshData, isLoading,
@@ -30,11 +31,15 @@ export default function HomeScreen() {
   const netBalance = monthlyIncome - monthlyExpense;
   const totalBalance = useMemo(() => getTotalBalance(), [getTotalBalance]);
 
+  const visibleAccounts = useMemo(() => accounts.filter(acc => !acc.isHidden), [accounts]);
+  const visibleAccountIds = useMemo(() => new Set(visibleAccounts.map(a => a.id)), [visibleAccounts]);
+
   const recentTransactions = useMemo(() => {
     return transactions
+      .filter(t => visibleAccountIds.has(t.accountId))
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
       .slice(0, 5);
-  }, [transactions]);
+  }, [transactions, visibleAccountIds]);
 
   const prevMonth = () => {
     if (selectedMonth === 0) {
@@ -79,8 +84,6 @@ export default function HomeScreen() {
   const topInset = Platform.OS === 'web' ? 67 : insets.top;
   const bottomInset = Platform.OS === 'web' ? 34 : 0;
 
-  const isDarkMode = theme.background === '#0A0A0F';
-
   return (
     <View style={[styles.container, { paddingTop: topInset, backgroundColor: theme.background }]}>
       <ScrollView
@@ -113,15 +116,15 @@ export default function HomeScreen() {
           </Pressable>
         </View>
 
-        {/* Robust Summary Card Container to fix square background bleed and visibility issues */}
+        {/* Shadow Wrapper: Handles only the shadow/elevation */}
         <View style={[
-          styles.summaryShadowContainer,
-          { backgroundColor: isDarkMode ? '#14141C' : '#FFFFFF' },
-          !isDarkMode && styles.lightSummaryCardBorder
+          styles.summaryShadowWrapper,
+          isDark ? styles.summaryShadowDark : styles.summaryShadowLight
         ]}>
-          <View style={styles.summaryCardClipping}>
+          {/* Clipping Container: Handles borderRadius and overflow */}
+          <View style={styles.summaryClipContainer}>
             <LinearGradient
-              colors={isDarkMode ? ['#1A2F2A', '#14141C'] : ['#E8F5E9', '#FFFFFF']}
+              colors={isDark ? ['#1A2F2A', '#14141C'] : ['#E8F5E9', '#FFFFFF']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={styles.summaryCard}
@@ -168,7 +171,7 @@ export default function HomeScreen() {
             <Text style={[styles.totalLabel, { color: theme.textSecondary }]}>Total Balance</Text>
             <Text style={[styles.totalAmount, { color: theme.text }]}>{formatCurrency(totalBalance)}</Text>
           </Pressable>
-          {accounts.map(account => (
+          {visibleAccounts.map(account => (
             <Pressable key={account.id} style={[styles.accountCard, { borderLeftColor: account.color, backgroundColor: theme.card }]}>
               <Ionicons name={account.icon as any} size={18} color={account.color} />
               <Text style={[styles.accountName, { color: theme.textSecondary }]} numberOfLines={1}>{account.name}</Text>
@@ -258,9 +261,9 @@ const styles = StyleSheet.create({
   settingsBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   monthSelector: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, gap: 16 },
   monthText: { fontSize: 15, fontFamily: 'DMSans_600SemiBold', minWidth: 140, textAlign: 'center' },
-  summaryShadowContainer: {
+  summaryShadowWrapper: {
     marginHorizontal: 20,
-    marginBottom: 12,
+    marginBottom: 8,
     borderRadius: 20,
     ...Platform.select({
       ios: {
@@ -274,13 +277,17 @@ const styles = StyleSheet.create({
       }
     }),
   },
-  summaryCardClipping: {
-    borderRadius: 20,
-    overflow: 'hidden',
-  },
-  lightSummaryCardBorder: {
+  summaryShadowLight: {
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#E8F5E9',
+  },
+  summaryShadowDark: {
+    backgroundColor: '#14141C',
+  },
+  summaryClipContainer: {
+    borderRadius: 20,
+    overflow: 'hidden',
   },
   summaryCard: {
     padding: 20,

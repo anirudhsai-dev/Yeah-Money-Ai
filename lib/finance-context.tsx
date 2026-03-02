@@ -167,26 +167,50 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
   }, [accountBalanceMap]);
 
   const getTotalBalance = useCallback(() => {
-    return accounts.reduce((total, acc) => total + getAccountBalance(acc.id), 0);
+    return accounts
+      .filter(acc => !acc.isHidden)
+      .reduce((total, acc) => total + getAccountBalance(acc.id), 0);
   }, [accounts, getAccountBalance]);
 
   const getMonthlyIncome = useCallback((year: number, month: number) => {
     return transactions
       .filter(t => {
         const d = parseISODate(t.date);
-        return !!d && t.type === 'income' && d.getFullYear() === year && d.getMonth() === month;
+        if (!d || d.getFullYear() !== year || d.getMonth() !== month) return false;
+
+        const fromAcc = accounts.find(a => a.id === t.accountId);
+        const toAcc = t.toAccountId ? accounts.find(a => a.id === t.toAccountId) : null;
+
+        if (t.type === 'income') {
+          return fromAcc && !fromAcc.isHidden;
+        } else if (t.type === 'transfer') {
+          // Inflow to visible pool: from hidden to visible
+          return (fromAcc && fromAcc.isHidden) && (toAcc && !toAcc.isHidden);
+        }
+        return false;
       })
       .reduce((sum, t) => sum + t.amount, 0);
-  }, [transactions]);
+  }, [transactions, accounts]);
 
   const getMonthlyExpense = useCallback((year: number, month: number) => {
     return transactions
       .filter(t => {
         const d = parseISODate(t.date);
-        return !!d && t.type === 'expense' && d.getFullYear() === year && d.getMonth() === month;
+        if (!d || d.getFullYear() !== year || d.getMonth() !== month) return false;
+
+        const fromAcc = accounts.find(a => a.id === t.accountId);
+        const toAcc = t.toAccountId ? accounts.find(a => a.id === t.toAccountId) : null;
+
+        if (t.type === 'expense') {
+          return fromAcc && !fromAcc.isHidden;
+        } else if (t.type === 'transfer') {
+          // Outflow from visible pool: from visible to hidden
+          return (fromAcc && !fromAcc.isHidden) && (toAcc && toAcc.isHidden);
+        }
+        return false;
       })
       .reduce((sum, t) => sum + t.amount, 0);
-  }, [transactions]);
+  }, [transactions, accounts]);
 
   const value = useMemo(() => ({
     accounts, categories, transactions, goals, isLoading,
@@ -205,7 +229,11 @@ export function FinanceProvider({ children }: { children: ReactNode }) {
     getAccountBalance, getTotalBalance,
     getMonthlyIncome, getMonthlyExpense, loadData]);
 
-  return <FinanceContext.Provider value={value}>{children}</FinanceContext.Provider>;
+  return (
+    <FinanceContext.Provider value={value}>
+      {children}
+    </FinanceContext.Provider>
+  );
 }
 
 export function useFinance() {

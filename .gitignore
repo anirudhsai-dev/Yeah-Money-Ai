@@ -38,7 +38,7 @@ yarn-error.*
 *.tsbuildinfo
 .vercel
 
-.env
+
 
 # IDEs
 .idea/

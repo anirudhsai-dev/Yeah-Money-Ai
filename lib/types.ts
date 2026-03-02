@@ -4,6 +4,7 @@ export interface Account {
   icon: string;
   color: string;
   openingBalance: number;
+  isHidden: boolean; // Future savings / hidden from totals
   createdAt: string;
 }
 
@@ -60,8 +61,8 @@ export const DEFAULT_CATEGORIES: Category[] = [
 ];
 
 export const DEFAULT_ACCOUNTS: Account[] = [
-  { id: 'acc_cash', name: 'Cash', icon: 'cash', color: '#00D09C', openingBalance: 0, createdAt: new Date().toISOString() },
-  { id: 'acc_bank', name: 'Bank Account', icon: 'business', color: '#5B8DEF', openingBalance: 0, createdAt: new Date().toISOString() },
+  { id: 'acc_cash', name: 'Cash', icon: 'cash', color: '#00D09C', openingBalance: 0, isHidden: false, createdAt: new Date().toISOString() },
+  { id: 'acc_bank', name: 'Bank Account', icon: 'business', color: '#5B8DEF', openingBalance: 0, isHidden: false, createdAt: new Date().toISOString() },
 ];
 
 export const ACCOUNT_ICONS = [

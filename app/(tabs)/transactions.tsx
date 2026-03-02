@@ -25,9 +25,12 @@ export default function TransactionsScreen() {
 
   const categoryById = useMemo(() => new Map(categories.map(c => [c.id, c])), [categories]);
   const accountById = useMemo(() => new Map(accounts.map(a => [a.id, a])), [accounts]);
+  const visibleAccountIds = useMemo(() => new Set(accounts.filter(a => !a.isHidden).map(a => a.id)), [accounts]);
 
   const filtered = useMemo(() => {
-    let list = [...transactions];
+    // Filter out transactions from hidden accounts
+    let list = transactions.filter(t => visibleAccountIds.has(t.accountId));
+
     if (filterType !== 'all') list = list.filter(t => t.type === filterType);
     if (search.trim()) {
       const q = search.toLowerCase();
@@ -47,7 +50,7 @@ export default function TransactionsScreen() {
       const dateB = parseISODate(b.date)?.getTime() ?? 0;
       return dateB - dateA;
     });
-  }, [transactions, filterType, search, categoryById, accountById]);
+  }, [transactions, filterType, search, categoryById, accountById, visibleAccountIds]);
 
   const getCategoryName = (categoryId?: string) => {
     if (!categoryId) return 'Transfer';

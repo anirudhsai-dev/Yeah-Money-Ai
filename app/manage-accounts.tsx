@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   StyleSheet, Text, View, Pressable, TextInput,
-  Platform, Alert,
+  Platform, Alert, Switch,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -24,6 +24,7 @@ export default function ManageAccountsScreen() {
   const [icon, setIcon] = useState('cash');
   const [color, setColor] = useState(Colors.accountColors[0]);
   const [openingBalance, setOpeningBalance] = useState('0');
+  const [isHidden, setIsHidden] = useState(false);
 
   const topInset = Platform.OS === 'web' ? 67 : insets.top;
   const bottomInset = Platform.OS === 'web' ? 34 : insets.bottom;
@@ -33,6 +34,7 @@ export default function ManageAccountsScreen() {
     setIcon('cash');
     setColor(Colors.accountColors[0]);
     setOpeningBalance('0');
+    setIsHidden(false);
     setEditingId(null);
     setShowForm(false);
   };
@@ -43,6 +45,7 @@ export default function ManageAccountsScreen() {
     setIcon(acc.icon);
     setColor(acc.color);
     setOpeningBalance(acc.openingBalance.toString());
+    setIsHidden(!!acc.isHidden);
     setShowForm(true);
   };
 
@@ -53,9 +56,9 @@ export default function ManageAccountsScreen() {
     }
     const bal = parseFloat(openingBalance) || 0;
     if (editingId) {
-      await updateAccount(editingId, { name: name.trim(), icon, color, openingBalance: bal });
+      await updateAccount(editingId, { name: name.trim(), icon, color, openingBalance: bal, isHidden });
     } else {
-      await addAccount({ name: name.trim(), icon, color, openingBalance: bal });
+      await addAccount({ name: name.trim(), icon, color, openingBalance: bal, isHidden });
     }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     resetForm();
@@ -66,7 +69,7 @@ export default function ManageAccountsScreen() {
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete', style: 'destructive',
-        onPress: () => { deleteAccount(id); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); },
+        onPress: () => { deleteGoal(id); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); },
       },
     ]);
   };
@@ -99,7 +102,15 @@ export default function ManageAccountsScreen() {
               <Ionicons name={acc.icon as any} size={20} color={acc.color} />
             </View>
             <View style={styles.accInfo}>
-              <Text style={[styles.accName, { color: theme.text }]}>{acc.name}</Text>
+              <View style={styles.nameRow}>
+                <Text style={[styles.accName, { color: theme.text }]}>{acc.name}</Text>
+                {acc.isHidden && (
+                  <View style={[styles.hiddenBadge, { backgroundColor: theme.cardElevated }]}>
+                    <Ionicons name="eye-off" size={10} color={theme.textTertiary} />
+                    <Text style={[styles.hiddenText, { color: theme.textTertiary }]}>Hidden</Text>
+                  </View>
+                )}
+              </View>
               <Text style={[styles.accBalance, { color: theme.textSecondary }]}>Balance: {formatCurrency(getAccountBalance(acc.id))}</Text>
             </View>
             <Pressable onPress={() => handleDelete(acc.id, acc.name)} hitSlop={12}>
@@ -133,6 +144,20 @@ export default function ManageAccountsScreen() {
               onChangeText={setOpeningBalance}
               keyboardType="decimal-pad"
             />
+
+            <View style={styles.switchRow}>
+              <View style={styles.switchLabelContainer}>
+                <Text style={[styles.switchLabel, { color: theme.text }]}>Hide Account</Text>
+                <Text style={[styles.switchSub, { color: theme.textSecondary }]}>Exclude from total savings & goals</Text>
+              </View>
+              <Switch
+                value={isHidden}
+                onValueChange={setIsHidden}
+                trackColor={{ false: theme.border, true: theme.primaryMuted }}
+                thumbColor={isHidden ? theme.primary : theme.textTertiary}
+              />
+            </View>
+
             <Text style={[styles.pickLabel, { color: theme.textSecondary }]}>Icon</Text>
             <View style={styles.iconRow}>
               {ACCOUNT_ICONS.map(ic => (
@@ -177,13 +202,20 @@ const styles = StyleSheet.create({
   accountItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, gap: 12, borderBottomWidth: 1 },
   accIcon: { width: 42, height: 42, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   accInfo: { flex: 1, gap: 2 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   accName: { fontSize: 15, fontFamily: 'DMSans_600SemiBold' },
+  hiddenBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  hiddenText: { fontSize: 10, fontFamily: 'DMSans_600SemiBold' },
   accBalance: { fontSize: 12, fontFamily: 'DMSans_400Regular' },
   emptyState: { alignItems: 'center', paddingVertical: 60, gap: 8 },
   emptyText: { fontSize: 15, fontFamily: 'DMSans_600SemiBold' },
   formCard: { marginHorizontal: 20, borderRadius: 16, padding: 20, marginTop: 16, gap: 12 },
   formTitle: { fontSize: 16, fontFamily: 'DMSans_600SemiBold' },
   input: { borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, fontFamily: 'DMSans_500Medium' },
+  switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginVertical: 8 },
+  switchLabelContainer: { flex: 1, marginRight: 10 },
+  switchLabel: { fontSize: 14, fontFamily: 'DMSans_500Medium' },
+  switchSub: { fontSize: 11, fontFamily: 'DMSans_400Regular' },
   pickLabel: { fontSize: 12, fontFamily: 'DMSans_500Medium' },
   iconRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   iconOption: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: 'transparent' },

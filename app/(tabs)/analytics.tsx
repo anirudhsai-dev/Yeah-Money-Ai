@@ -95,7 +95,7 @@ function PieChart({ data, theme, totalLabel }: PieChartProps) {
                   {item.name}
                 </Text>
                 <Text style={[styles.legendValueSmall, { color: theme.textSecondary }]}>
-                  {Math.round((item.amount / total) * 100)}%
+                  {formatCurrency(item.amount)} ({Math.round((item.amount / total) * 100)}%)
                 </Text>
               </View>
               <View style={[styles.legendBarTrack, { backgroundColor: theme.cardElevated }]}>
@@ -131,12 +131,14 @@ export default function AnalyticsScreen() {
     Haptics.selectionAsync();
   };
 
+  const visibleAccountIds = useMemo(() => new Set(accounts.filter(a => !a.isHidden).map(a => a.id)), [accounts]);
+
   const monthlyTxns = useMemo(() => {
     return transactions.filter(t => {
       const d = parseISODate(t.date);
-      return !!d && d.getFullYear() === selectedYear && d.getMonth() === selectedMonth;
+      return !!d && d.getFullYear() === selectedYear && d.getMonth() === selectedMonth && visibleAccountIds.has(t.accountId);
     });
-  }, [transactions, selectedYear, selectedMonth]);
+  }, [transactions, selectedYear, selectedMonth, visibleAccountIds]);
 
   const totalIncome = useMemo(() => monthlyTxns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0), [monthlyTxns]);
   const totalExpense = useMemo(() => monthlyTxns.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0), [monthlyTxns]);
@@ -188,27 +190,29 @@ export default function AnalyticsScreen() {
       const income = transactions
         .filter(t => {
           const d = parseISODate(t.date);
-          return !!d && t.type === 'income' && d.getFullYear() === y && d.getMonth() === m;
+          return !!d && t.type === 'income' && d.getFullYear() === y && d.getMonth() === m && visibleAccountIds.has(t.accountId);
         })
         .reduce((s, t) => s + t.amount, 0);
       const expense = transactions
         .filter(t => {
           const d = parseISODate(t.date);
-          return !!d && t.type === 'expense' && d.getFullYear() === y && d.getMonth() === m;
+          return !!d && t.type === 'expense' && d.getFullYear() === y && d.getMonth() === m && visibleAccountIds.has(t.accountId);
         })
         .reduce((s, t) => s + t.amount, 0);
       result.push({ month: getShortMonthName(m), income, expense });
     }
     return result;
-  }, [transactions, selectedMonth, selectedYear]);
+  }, [transactions, selectedMonth, selectedYear, visibleAccountIds]);
 
   const maxTrend = useMemo(() => Math.max(...last6Months.map(m => Math.max(m.income, m.expense)), 1), [last6Months]);
 
   const accountDistribution = useMemo(() => {
-    return accounts.map(acc => ({
-      ...acc,
-      balance: getAccountBalance(acc.id),
-    })).filter(a => a.balance > 0).sort((a, b) => b.balance - a.balance);
+    return accounts
+      .filter(a => !a.isHidden)
+      .map(acc => ({
+        ...acc,
+        balance: getAccountBalance(acc.id),
+      })).filter(a => a.balance > 0).sort((a, b) => b.balance - a.balance);
   }, [accounts, getAccountBalance]);
 
   const totalPositiveBalance = useMemo(() => accountDistribution.reduce((s, a) => s + a.balance, 0), [accountDistribution]);
@@ -227,7 +231,7 @@ export default function AnalyticsScreen() {
     const previousByCategory = new Map<string, number>();
 
     for (const txn of transactions) {
-      if (txn.type !== 'expense' || !txn.categoryId) continue;
+      if (txn.type !== 'expense' || !txn.categoryId || !visibleAccountIds.has(txn.accountId)) continue;
       const d = parseISODate(txn.date);
       if (!d) continue;
 
@@ -259,7 +263,7 @@ export default function AnalyticsScreen() {
       .filter(item => item.change > 0)
       .sort((a, b) => b.change - a.change)
       .slice(0, 5);
-  }, [transactions, categories, selectedMonth, selectedYear]);
+  }, [transactions, categories, selectedMonth, selectedYear, visibleAccountIds]);
 
 
   return (

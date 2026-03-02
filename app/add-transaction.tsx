@@ -1,17 +1,38 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   StyleSheet, Text, View, Pressable, TextInput,
-  Platform, Alert, Switch,
+  Platform, Alert, Switch, ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withTiming,
+  withSequence,
+  Easing,
+  FadeIn,
+  FadeOut,
+} from 'react-native-reanimated';
 import { useTheme } from '@/hooks/useTheme';
 import { useFinance } from '@/lib/finance-context';
-import { Transaction } from '@/lib/types';
+import { Transaction, Category } from '@/lib/types';
 import DatePicker from '@/components/DatePicker';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
+import { autoCategorize, AISuggestion } from '@/lib/ai-service';
+import { savePreference } from '@/lib/sqlite-service';
+import Colors from '@/constants/colors';
+
+const CATEGORY_ICONS = [
+  'restaurant', 'car', 'cart', 'flash', 'game-controller', 'medkit',
+  'school', 'home', 'nutrition', 'wallet', 'laptop', 'trending-up',
+  'gift', 'return-down-back', 'airplane', 'fitness', 'shirt',
+  'musical-notes', 'paw', 'cafe', 'book', 'construct',
+  'ellipsis-horizontal-circle',
+];
 
 type TxnType = 'expense' | 'income' | 'transfer';
 
@@ -21,7 +42,7 @@ export default function AddTransactionScreen() {
   const params = useLocalSearchParams<{ editId?: string }>();
   const {
     accounts, categories, transactions,
-    addTransaction, updateTransaction, deleteTransaction,
+    addTransaction, updateTransaction, deleteTransaction, addCategory, updateCategory, deleteCategory
   } = useFinance();
 
   const editTxn = params.editId ? transactions.find(t => t.id === params.editId) : null;
@@ -38,6 +59,18 @@ export default function AddTransactionScreen() {
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [showAccountPicker, setShowAccountPicker] = useState<'from' | 'to' | null>(null);
 
+  // Category Form State
+  const [showCategoryForm, setShowCategoryForm] = useState(false);
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+  const [categoryName, setCategoryName] = useState('');
+  const [categoryIcon, setCategoryIcon] = useState('restaurant');
+
+  // AI States
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [wasAiAssigned, setWasAiAssigned] = useState(false);
+  const [aiSuggestion, setAiSuggestion] = useState<AISuggestion | null>(null);
+  const [lastAnalyzedNotes, setLastAnalyzedNotes] = useState('');
+
   const topInset = Platform.OS === 'web' ? 67 : insets.top;
   const bottomInset = Platform.OS === 'web' ? 34 : insets.bottom;
 
@@ -45,11 +78,84 @@ export default function AddTransactionScreen() {
     return categories.filter(c => c.type === (type === 'transfer' ? 'expense' : type));
   }, [categories, type]);
 
+  // Sparkle Animation
+  const sparkleScale = useSharedValue(0);
+  const sparkleRotate = useSharedValue(0);
+
   useEffect(() => {
-    if (!editTxn && filteredCategories.length > 0 && type !== 'transfer') {
+    if (isAnalyzing) {
+      sparkleScale.value = withRepeat(
+        withSequence(
+          withTiming(1.2, { duration: 400, easing: Easing.inOut(Easing.ease) }),
+          withTiming(0.8, { duration: 400, easing: Easing.inOut(Easing.ease) })
+        ),
+        -1,
+        true
+      );
+      sparkleRotate.value = withRepeat(
+        withTiming(360, { duration: 2000, easing: Easing.linear }),
+        -1
+      );
+    } else {
+      sparkleScale.value = withTiming(0);
+    }
+  }, [isAnalyzing]);
+
+  const animatedSparkleStyle = useAnimatedStyle(() => ({
+    transform: [
+      { scale: sparkleScale.value },
+      { rotate: `${sparkleRotate.value}deg` }
+    ],
+    opacity: sparkleScale.value,
+    position: 'absolute',
+    right: -10,
+    top: -10,
+  }));
+
+  const handleAutoCategorize = async () => {
+    if (type === 'transfer' || editTxn || !notes.trim() || notes === lastAnalyzedNotes) return;
+
+    setIsAnalyzing(true);
+    setAiSuggestion(null);
+    setWasAiAssigned(false);
+
+    const result = await autoCategorize(notes, filteredCategories);
+
+    if (result) {
+      if (result.categoryId) {
+        setCategoryId(result.categoryId);
+        setWasAiAssigned(true);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else {
+        setAiSuggestion(result);
+        if (result.suggestedName) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        }
+      }
+    }
+
+    setIsAnalyzing(false);
+    setLastAnalyzedNotes(notes);
+  };
+
+  const createSuggestedCategory = async () => {
+    if (!aiSuggestion?.suggestedName) return;
+
+    await addCategory({
+      name: aiSuggestion.suggestedName,
+      icon: 'pricetag',
+      type: type === 'income' ? 'income' : 'expense'
+    });
+
+    Alert.alert("Success", `Category "${aiSuggestion.suggestedName}" created! You can now select it.`);
+    setAiSuggestion(null);
+  };
+
+  useEffect(() => {
+    if (!editTxn && filteredCategories.length > 0 && type !== 'transfer' && !wasAiAssigned && !aiSuggestion) {
       setCategoryId(filteredCategories[0].id);
     }
-  }, [type]);
+  }, [type, wasAiAssigned, aiSuggestion, filteredCategories, editTxn]);
 
   const handleSave = () => {
     const amt = parseFloat(amount);
@@ -96,6 +202,70 @@ export default function AddTransactionScreen() {
           deleteTransaction(editTxn.id);
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           router.back();
+        },
+      },
+    ]);
+  };
+
+  const onManualCategoryChange = async (id: string) => {
+    setCategoryId(id);
+    setShowCategoryPicker(false);
+    setWasAiAssigned(false);
+    setAiSuggestion(null);
+    Haptics.selectionAsync();
+
+    if (notes.trim().length > 2) {
+      await savePreference(notes.trim(), id);
+    }
+  };
+
+  // Category CRUD Logic
+  const resetCategoryForm = () => {
+    setCategoryName('');
+    setCategoryIcon('restaurant');
+    setEditingCategoryId(null);
+    setShowCategoryForm(false);
+  };
+
+  const startAddCategory = () => {
+    setEditingCategoryId(null);
+    setCategoryName('');
+    setCategoryIcon('restaurant');
+    setShowCategoryForm(true);
+    Haptics.selectionAsync();
+  };
+
+  const startEditCategory = (cat: Category) => {
+    setEditingCategoryId(cat.id);
+    setCategoryName(cat.name);
+    setCategoryIcon(cat.icon);
+    setShowCategoryForm(true);
+    Haptics.selectionAsync();
+  };
+
+  const handleSaveCategory = async () => {
+    if (!categoryName.trim()) {
+      Alert.alert('Name Required', 'Please enter a category name.');
+      return;
+    }
+    if (editingCategoryId) {
+      await updateCategory(editingCategoryId, { name: categoryName.trim(), icon: categoryIcon });
+    } else {
+      await addCategory({ name: categoryName.trim(), icon: categoryIcon, type: type === 'income' ? 'income' : 'expense' });
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    resetCategoryForm();
+  };
+
+  const handleDeleteCategory = (cat: Category) => {
+    Alert.alert('Delete Category', `Delete "${cat.name}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive',
+        onPress: async () => {
+          await deleteCategory(cat.id);
+          if (categoryId === cat.id) setCategoryId('');
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         },
       },
     ]);
@@ -187,15 +357,52 @@ export default function AddTransactionScreen() {
 
         {type !== 'transfer' && (
           <View style={styles.field}>
-            <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>Category</Text>
+            <View style={styles.fieldLabelRow}>
+              <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>Category</Text>
+              <Pressable
+                style={[styles.autoDetectBtn, { backgroundColor: theme.primaryMuted }]}
+                onPress={handleAutoCategorize}
+                disabled={isAnalyzing}
+              >
+                <Ionicons name="star" size={12} color={theme.primary} />
+                <Text style={[styles.autoDetectText, { color: theme.primary }]}>
+                  {isAnalyzing ? "Analyzing..." : "Auto Detect"}
+                </Text>
+              </Pressable>
+            </View>
             <Pressable
               style={[styles.fieldValue, { backgroundColor: theme.card }]}
               onPress={() => setShowCategoryPicker(true)}
             >
-              <Ionicons name={(categories.find(c => c.id === categoryId)?.icon || 'pricetag') as any} size={18} color={typeColors[type]} />
-              <Text style={[styles.fieldValueText, { color: theme.text }]}>{getCategoryName(categoryId)}</Text>
+              <View style={{ position: 'relative' }}>
+                <Ionicons name={(categories.find(c => c.id === categoryId)?.icon || 'pricetag') as any} size={18} color={wasAiAssigned ? theme.primary : typeColors[type]} />
+                {isAnalyzing && (
+                  <Animated.View style={animatedSparkleStyle}>
+                    <Ionicons name="sparkles" size={12} color={theme.primary} />
+                  </Animated.View>
+                )}
+              </View>
+              <Text style={[styles.fieldValueText, { color: theme.text }]}>
+                {getCategoryName(categoryId)}
+                {wasAiAssigned && <Text style={{ fontSize: 10, color: theme.primary }}> (AI assigned - correct if wrong)</Text>}
+              </Text>
               <Ionicons name="chevron-forward" size={16} color={theme.textTertiary} />
             </Pressable>
+
+            {aiSuggestion?.suggestedName && (
+              <Animated.View entering={FadeIn} exiting={FadeOut} style={[styles.suggestionBox, { backgroundColor: theme.warningMuted, borderColor: theme.warning }]}>
+                <Ionicons name="bulb-outline" size={16} color={theme.warning} />
+                <Text style={[styles.suggestionText, { color: theme.text }]}>
+                  Create category: <Text style={{ fontFamily: 'DMSans_700Bold' }}>{aiSuggestion.suggestedName}</Text>?
+                </Text>
+                <Pressable style={[styles.createBtn, { backgroundColor: theme.warning }]} onPress={createSuggestedCategory}>
+                  <Text style={styles.createBtnText}>Create</Text>
+                </Pressable>
+                <Pressable onPress={() => setAiSuggestion(null)} hitSlop={10}>
+                  <Ionicons name="close" size={16} color={theme.textTertiary} />
+                </Pressable>
+              </Animated.View>
+            )}
           </View>
         )}
 
@@ -225,12 +432,13 @@ export default function AddTransactionScreen() {
         </View>
 
         <View style={styles.field}>
-          <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>Notes (optional)</Text>
+          <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>Notes (describe expense for AI categorization)</Text>
           <TextInput
             style={[styles.notesInput, { backgroundColor: theme.card, color: theme.text }]}
             value={notes}
             onChangeText={setNotes}
-            placeholder="Add a note..."
+            onBlur={handleAutoCategorize}
+            placeholder="e.g. Dinner with friends at Italian restaurant"
             placeholderTextColor={theme.textTertiary}
             multiline
           />
@@ -245,22 +453,78 @@ export default function AddTransactionScreen() {
             <View style={[styles.pickerCard, { backgroundColor: theme.card }]}>
               <View style={[styles.pickerHeader, { borderBottomColor: theme.border }]}>
                 <Text style={[styles.pickerTitle, { color: theme.text }]}>Select Category</Text>
-                <Pressable onPress={() => setShowCategoryPicker(false)}>
-                  <Ionicons name="close" size={22} color={theme.text} />
-                </Pressable>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 15 }}>
+                  <Pressable onPress={startAddCategory} hitSlop={12}>
+                    <Ionicons name="add" size={24} color={theme.primary} />
+                  </Pressable>
+                  <Pressable onPress={() => setShowCategoryPicker(false)}>
+                    <Ionicons name="close" size={22} color={theme.text} />
+                  </Pressable>
+                </View>
               </View>
               <KeyboardAwareScrollViewCompat style={styles.pickerList}>
                 {filteredCategories.map(cat => (
-                  <Pressable
-                    key={cat.id}
-                    style={[styles.pickerItem, { borderBottomColor: theme.border }, categoryId === cat.id && [styles.pickerItemActive, { backgroundColor: theme.cardElevated }]]}
-                    onPress={() => { setCategoryId(cat.id); setShowCategoryPicker(false); Haptics.selectionAsync(); }}
-                  >
-                    <Ionicons name={cat.icon as any} size={20} color={categoryId === cat.id ? typeColors[type] : theme.textSecondary} />
-                    <Text style={[styles.pickerItemText, { color: theme.text }, categoryId === cat.id && { color: typeColors[type] }]}>{cat.name}</Text>
-                  </Pressable>
+                  <View key={cat.id} style={[styles.pickerItem, { borderBottomColor: theme.border }, categoryId === cat.id && [styles.pickerItemActive, { backgroundColor: theme.cardElevated }]]}>
+                    <Pressable
+                      style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 }}
+                      onPress={() => onManualCategoryChange(cat.id)}
+                    >
+                      <Ionicons name={cat.icon as any} size={20} color={categoryId === cat.id ? typeColors[type] : theme.textSecondary} />
+                      <Text style={[styles.pickerItemText, { color: theme.text }, categoryId === cat.id && { color: typeColors[type] }]}>{cat.name}</Text>
+                    </Pressable>
+                    <View style={{ flexDirection: 'row', gap: 12 }}>
+                      <Pressable onPress={() => startEditCategory(cat)} hitSlop={10}>
+                        <Ionicons name="pencil-outline" size={18} color={theme.textSecondary} />
+                      </Pressable>
+                      <Pressable onPress={() => handleDeleteCategory(cat)} hitSlop={10}>
+                        <Ionicons name="trash-outline" size={18} color={theme.expense} />
+                      </Pressable>
+                    </View>
+                  </View>
                 ))}
               </KeyboardAwareScrollViewCompat>
+            </View>
+          </View>
+        )}
+
+        {showCategoryForm && (
+          <View style={styles.pickerOverlay}>
+            <View style={[styles.pickerCard, { backgroundColor: theme.card }]}>
+              <View style={[styles.pickerHeader, { borderBottomColor: theme.border }]}>
+                <Text style={[styles.pickerTitle, { color: theme.text }]}>{editingCategoryId ? 'Edit Category' : 'New Category'}</Text>
+                <Pressable onPress={resetCategoryForm}>
+                  <Ionicons name="close" size={22} color={theme.text} />
+                </Pressable>
+              </View>
+              <ScrollView style={{ padding: 20 }}>
+                <TextInput
+                  style={[styles.input, { backgroundColor: theme.cardElevated, color: theme.text, marginBottom: 16 }]}
+                  placeholder="Category name"
+                  placeholderTextColor={theme.textTertiary}
+                  value={categoryName}
+                  onChangeText={setCategoryName}
+                />
+                <Text style={[styles.pickLabel, { color: theme.textSecondary, marginBottom: 12 }]}>Icon</Text>
+                <View style={styles.iconGrid}>
+                  {CATEGORY_ICONS.map(ic => (
+                    <Pressable
+                      key={ic}
+                      style={[styles.iconOption, { backgroundColor: theme.cardElevated }, categoryIcon === ic && [styles.iconSelected, { backgroundColor: theme.primaryMuted, borderColor: theme.primary }]]}
+                      onPress={() => { setCategoryIcon(ic); Haptics.selectionAsync(); }}
+                    >
+                      <Ionicons name={ic as any} size={20} color={categoryIcon === ic ? theme.primary : theme.textSecondary} />
+                    </Pressable>
+                  ))}
+                </View>
+                <View style={styles.formActions}>
+                  <Pressable style={[styles.cancelBtn, { backgroundColor: theme.cardElevated }]} onPress={resetCategoryForm}>
+                    <Text style={[styles.cancelText, { color: theme.textSecondary }]}>Cancel</Text>
+                  </Pressable>
+                  <Pressable style={[styles.saveCategoryBtn, { backgroundColor: theme.primary }]} onPress={handleSaveCategory}>
+                    <Text style={styles.saveCategoryText}>Save</Text>
+                  </Pressable>
+                </View>
+              </ScrollView>
             </View>
           </View>
         )}
@@ -313,20 +577,38 @@ const styles = StyleSheet.create({
   currencySymbol: { fontSize: 36, fontFamily: 'DMSans_700Bold' },
   amountInput: { fontSize: 42, fontFamily: 'DMSans_700Bold', textAlign: 'center', minWidth: 100, padding: 0 },
   field: { paddingHorizontal: 20, marginBottom: 16 },
-  fieldLabel: { fontSize: 12, fontFamily: 'DMSans_500Medium', marginBottom: 8 },
+  fieldLabelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  fieldLabel: { fontSize: 12, fontFamily: 'DMSans_500Medium' },
+  autoDetectBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  autoDetectText: { fontSize: 10, fontFamily: 'DMSans_700Bold' },
   fieldValue: { flexDirection: 'row', alignItems: 'center', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 14, gap: 10 },
   fieldValueText: { flex: 1, fontSize: 14, fontFamily: 'DMSans_500Medium' },
+  suggestionBox: { flexDirection: 'row', alignItems: 'center', marginTop: 8, padding: 10, borderRadius: 10, borderWidth: 1, gap: 10 },
+  suggestionText: { flex: 1, fontSize: 12, fontFamily: 'DMSans_400Regular' },
+  createBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
+  createBtnText: { color: '#fff', fontSize: 11, fontFamily: 'DMSans_700Bold' },
   dateInput: { borderRadius: 12, paddingHorizontal: 14, paddingVertical: 14, fontSize: 14, fontFamily: 'DMSans_500Medium' },
   switchRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   notesInput: { borderRadius: 12, paddingHorizontal: 14, paddingVertical: 14, fontSize: 14, fontFamily: 'DMSans_400Regular', minHeight: 60, textAlignVertical: 'top' },
   saveBtn: { marginHorizontal: 20, borderRadius: 14, paddingVertical: 16, alignItems: 'center', marginTop: 8 },
   saveBtnText: { fontSize: 16, fontFamily: 'DMSans_700Bold', color: '#fff' },
   pickerOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end', zIndex: 100 },
-  pickerCard: { borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: 400, paddingBottom: 20 },
+  pickerCard: { borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: 500, paddingBottom: 20 },
   pickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1 },
   pickerTitle: { fontSize: 16, fontFamily: 'DMSans_600SemiBold' },
   pickerList: { paddingHorizontal: 20 },
   pickerItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, borderBottomWidth: 1 },
   pickerItemActive: { marginHorizontal: -20, paddingHorizontal: 20, borderRadius: 0 },
   pickerItemText: { fontSize: 14, fontFamily: 'DMSans_500Medium' },
+  input: { borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 14, fontFamily: 'DMSans_500Medium' },
+  pickLabel: { fontSize: 12, fontFamily: 'DMSans_500Medium' },
+  iconGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 },
+  iconOption: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  iconSelected: { borderWidth: 1.5 },
+  formActions: { flexDirection: 'row', gap: 10, marginTop: 10 },
+  cancelBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, alignItems: 'center' },
+  cancelText: { fontSize: 14, fontFamily: 'DMSans_600SemiBold' },
+  saveCategoryBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, alignItems: 'center' },
+  saveCategoryText: { fontSize: 14, fontFamily: 'DMSans_700Bold', color: '#fff' },
+  resetIconButton: { padding: 6, borderRadius: 8 },
 });
