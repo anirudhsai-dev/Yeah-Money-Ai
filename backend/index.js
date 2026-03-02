@@ -21,7 +21,19 @@ app.use(cors({
 
 app.use(express.json());
 
-// Routes
+// Root route - confirms server is live
+app.get('/', (req, res) => {
+  res.json({
+    message: 'YeahMoney Backend is running',
+    version: '1.0.0',
+    endpoints: {
+      health: '/health',
+      categorize: '/api/ai/categorize'
+    }
+  });
+});
+
+// AI Routes
 app.use('/api/ai', aiRoutes);
 
 // Health check for Render's zero-downtime deploys and monitoring
